@@ -4,15 +4,16 @@ import { useAdmin } from '../context/AuthContext';
 import { Icon, C } from './UI';
 
 const NAV = [
-  { path:'/dashboard',    icon:'dashboard',  label:'Dashboard' },
-  { path:'/registrations',icon:'users',      label:'Registrations', badge:'registrations' },
-  { path:'/kyc',          icon:'kyc',        label:'KYC Review',    badge:'kyc' },
-  { path:'/users',        icon:'users',      label:'Users' },
-  { path:'/rates',        icon:'rates',      label:'Rate Management' },
-  { path:'/bookings',     icon:'bookings',   label:'Bookings',      badge:'bookings' },
-  { path:'/enquiries',    icon:'enquiries',  label:'Enquiries',     badge:'enquiries' },
-  { path:'/search-activity',icon:'activity', label:'Search Activity' },
-  { path:'/analytics',   icon:'analytics',  label:'Analytics' },
+  { path:'/dashboard',     icon:'dashboard',  label:'Dashboard' },
+  { path:'/registrations', icon:'users',      label:'Registrations', badge:'registrations' },
+  { path:'/kyc',           icon:'kyc',        label:'KYC Review',    badge:'kyc' },
+  { path:'/users',         icon:'users',      label:'Users' },
+  { path:'/rates',         icon:'rates',      label:'Rate Management' },
+  { path:'/ports',         icon:'ports',      label:'Ports & Airports' },   // ← NEW
+  { path:'/bookings',      icon:'bookings',   label:'Bookings',      badge:'bookings' },
+  { path:'/enquiries',     icon:'enquiries',  label:'Enquiries',     badge:'enquiries' },
+  { path:'/search-activity',icon:'activity',  label:'Search Activity' },
+  { path:'/analytics',    icon:'analytics',  label:'Analytics' },
 ];
 
 export function PageHeader({ title, subtitle, actions }) {
@@ -36,10 +37,11 @@ export default function AdminLayout({ children, badges = {} }) {
 
   return (
     <div style={{ display:'flex', minHeight:'100vh', background:C.bg }}>
-      {/* Sidebar */}
+
+      {/* ── Sidebar ── */}
       <aside style={{ width:sideW, background:`linear-gradient(180deg,${C.navy} 0%,#162299 100%)`, display:'flex', flexDirection:'column', position:'fixed', top:0, left:0, bottom:0, zIndex:100, transition:'width .2s', boxShadow:'2px 0 16px rgba(13,27,94,.25)' }}>
 
-        {/* Logo */}
+        {/* Logo / collapse toggle */}
         <div style={{ padding: collapsed?'16px 0':'18px 20px', borderBottom:'1px solid rgba(255,255,255,.1)', display:'flex', alignItems:'center', gap:10, cursor:'pointer', minHeight:72 }} onClick={()=>setCollapsed(c=>!c)}>
           <img src="/nextgen-logo.jpg" alt="NGR" style={{ width:36, height:36, borderRadius:8, objectFit:'contain', background:'#fff', padding:2, flexShrink:0 }}/>
           {!collapsed && (
@@ -52,7 +54,7 @@ export default function AdminLayout({ children, badges = {} }) {
           )}
         </div>
 
-        {/* Nav */}
+        {/* Nav links */}
         <nav style={{ flex:1, overflowY:'auto', padding:'10px 0' }}>
           {NAV.map(item => (
             <NavLink key={item.path} to={item.path}
@@ -92,7 +94,7 @@ export default function AdminLayout({ children, badges = {} }) {
         </div>
       </aside>
 
-      {/* Main */}
+      {/* ── Main content ── */}
       <main style={{ flex:1, marginLeft:sideW, transition:'margin-left .2s', minHeight:'100vh', display:'flex', flexDirection:'column' }}>
         {children}
       </main>
