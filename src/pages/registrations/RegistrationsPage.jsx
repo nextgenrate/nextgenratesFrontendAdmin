@@ -1,7 +1,8 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import AdminLayout, { PageHeader } from '../../components/Layout';
 import { Card, Table, Badge, Btn, Modal, Icon, C, fmtDate, fmtDateTime, useToast } from '../../components/UI';
-import { getRegistrations, approveRegistration, rejectRegistration, resetUserKyc } from '../../services/api';
+import { getRegistrations, approveRegistration, rejectRegistration, 
+         resetUserKyc, deactivateRegistration, deleteRegistration } from '../../services/api';
 
 const STATUS_TABS = ['pending_approval', 'active', 'suspended', 'all'];
 const TAB_LABELS  = { pending_approval: 'Pending Review', active: 'Approved', suspended: 'Rejected', all: 'All' };
@@ -19,11 +20,13 @@ const SectionTitle = ({ label, color = C.navy }) => (
 );
 
 /* ─── Detail + Approve/Reject modal ── */
-function DetailModal({ reg, onClose, onApprove, onReject, onResetKyc }) {
-  const [screen, setScreen]       = useState('detail');   // 'detail' | 'reject'
-  const [reason, setReason]       = useState('');
-  const [approving, setApproving] = useState(false);
-  const [rejecting, setRejecting] = useState(false);
+function DetailModal({ reg, onClose, onApprove, onReject, onResetKyc, onDeactivate, onDelete }) {
+  const [screen, setScreen]         = useState('detail'); // 'detail'|'reject'|'deactivate'|'delete'
+  const [reason, setReason]         = useState('');
+  const [approving, setApproving]   = useState(false);
+  const [rejecting, setRejecting]   = useState(false);
+  const [deactivating, setDeactivating] = useState(false);
+  const [deleting, setDeleting]     = useState(false);
 
   const doApprove = async () => {
     setApproving(true);
@@ -38,27 +41,87 @@ function DetailModal({ reg, onClose, onApprove, onReject, onResetKyc }) {
     finally { setRejecting(false); }
   };
 
-  const isPending = reg.status === 'pending_approval';
+  const doDeactivate = async () => {
+    if (!reason.trim()) return;
+    setDeactivating(true);
+    try { await onDeactivate(reg._id, reason.trim()); onClose(); }
+    finally { setDeactivating(false); }
+  };
+
+  const doDelete = async () => {
+    setDeleting(true);
+    try { await onDelete(reg._id); onClose(); }
+    finally { setDeleting(false); }
+  };
+
+  const isPending  = reg.status === 'pending_approval';
+  const isActive   = reg.status === 'active';
+  const isSuspended = reg.status === 'suspended';
 
   const Footer = () => {
-    if (!isPending) return <Btn variant="ghost" onClick={onClose}>Close</Btn>;
     if (screen === 'reject') return (
       <>
-        <Btn variant="ghost" onClick={() => setScreen('detail')}>← Back</Btn>
+        <Btn variant="ghost" onClick={() => { setScreen('detail'); setReason(''); }}>← Back</Btn>
         <Btn variant="danger" loading={rejecting} onClick={doReject} disabled={!reason.trim()}>
           Confirm Rejection
         </Btn>
       </>
     );
+    if (screen === 'deactivate') return (
+      <>
+        <Btn variant="ghost" onClick={() => { setScreen('detail'); setReason(''); }}>← Back</Btn>
+        <Btn variant="danger" loading={deactivating} onClick={doDeactivate} disabled={!reason.trim()}>
+          Confirm Deactivation
+        </Btn>
+      </>
+    );
+    if (screen === 'delete') return (
+      <>
+        <Btn variant="ghost" onClick={() => setScreen('detail')}>← Back</Btn>
+        <Btn variant="danger" loading={deleting} onClick={doDelete}>
+          Yes, Permanently Delete
+        </Btn>
+      </>
+    );
+
+    // Default footer — varies by status
     return (
       <>
         <Btn variant="ghost" onClick={onClose}>Close</Btn>
-        <button onClick={() => setScreen('reject')} style={{ padding: '8px 18px', background: '#FFF1F0', color: '#D91A1A', border: '1.5px solid #FFCCC7', borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
-          Reject…
+
+        {/* Deactivate — only for active accounts */}
+        {isActive && (
+          <button onClick={() => { setScreen('deactivate'); setReason(''); }}
+            style={{ padding: '8px 18px', background: '#FFF7ED', color: '#C2410C', border: '1.5px solid #FED7AA', borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+            ⏸ Deactivate…
+          </button>
+        )}
+
+        {/* Re-activate — only for suspended accounts */}
+        {isSuspended && (
+          <Btn variant="orange" loading={approving} onClick={doApprove}>
+            ↺ Re-activate
+          </Btn>
+        )}
+
+        {/* Delete — always available (super admin guard is on the API) */}
+        <button onClick={() => setScreen('delete')}
+          style={{ padding: '8px 18px', background: '#FFF1F0', color: '#D91A1A', border: '1.5px solid #FFCCC7', borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+          🗑 Delete…
         </button>
-        <Btn variant="orange" loading={approving} onClick={doApprove}>
-          ✓ Approve & Activate
-        </Btn>
+
+        {/* Approve — only for pending */}
+        {isPending && (
+          <>
+            <button onClick={() => { setScreen('reject'); setReason(''); }}
+              style={{ padding: '8px 18px', background: '#FFF1F0', color: '#D91A1A', border: '1.5px solid #FFCCC7', borderRadius: 9, fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit' }}>
+              Reject…
+            </button>
+            <Btn variant="orange" loading={approving} onClick={doApprove}>
+              ✓ Approve & Activate
+            </Btn>
+          </>
+        )}
       </>
     );
   };
@@ -66,7 +129,36 @@ function DetailModal({ reg, onClose, onApprove, onReject, onResetKyc }) {
   return (
     <Modal open onClose={onClose} title={reg.company?.name || 'Registration Detail'} width={780} footer={<Footer />}>
 
-      {screen === 'reject' ? (
+    {screen === 'deactivate' ? (
+  <div>
+    <div style={{ padding: '12px 16px', background: '#FFF7ED', border: '1px solid #FED7AA', borderRadius: 10, marginBottom: 18, fontSize: 13, color: '#C2410C' }}>
+      ⏸ This will <strong>suspend</strong> the account. The user will lose access immediately. You can re-activate later.
+    </div>
+    <label style={{ fontSize: 12, fontWeight: 700, color: C.textSub, display: 'block', marginBottom: 6 }}>
+      Reason for Deactivation <span style={{ color: '#D91A1A' }}>*</span>
+    </label>
+    <textarea value={reason} onChange={e => setReason(e.target.value)} rows={4} autoFocus
+      placeholder="Explain why this account is being suspended…"
+      style={{ width: '100%', padding: '10px 14px', border: `1.5px solid ${C.border}`, borderRadius: 10, fontSize: 13, outline: 'none', resize: 'vertical', fontFamily: 'inherit', boxSizing: 'border-box' }} />
+    <div style={{ fontSize: 11, color: C.textMuted, marginTop: 4 }}>{reason.length} characters</div>
+  </div>
+) : screen === 'delete' ? (
+  <div>
+    <div style={{ padding: '16px', background: '#FFF1F0', border: '1px solid #FFCCC7', borderRadius: 10, marginBottom: 18 }}>
+      <div style={{ fontSize: 15, fontWeight: 800, color: '#D91A1A', marginBottom: 6 }}>⚠️ Permanent Deletion</div>
+      <div style={{ fontSize: 13, color: '#7F1D1D', lineHeight: 1.6 }}>
+        This will <strong>permanently delete</strong> the registration for <strong>{reg.company?.name}</strong> and all associated data.
+        This action <strong>cannot be undone</strong>. Only super admins can perform this action.
+      </div>
+    </div>
+    <div style={{ padding: '12px 16px', background: C.grayLight, borderRadius: 10, fontSize: 13, color: C.textSub }}>
+      <strong>Company:</strong> {reg.company?.name}<br />
+      <strong>Contact:</strong> {reg.name} · {reg.officialEmail}<br />
+      <strong>Registered:</strong> {fmtDate(reg.createdAt)}
+    </div>
+  </div>
+) : screen === 'reject' ? (
+  /* existing reject JSX unchanged */
         /* ── Reject screen ── */
         <div>
           <div style={{ padding: '12px 16px', background: '#FFF1F0', border: '1px solid #FFCCC7', borderRadius: 10, marginBottom: 18, fontSize: 13, color: '#D91A1A' }}>
@@ -246,6 +338,22 @@ export default function RegistrationsPage() {
     } catch (err) { show(err.message, 'error'); }
   };
 
+  const handleDeactivate = async (userId, reason) => {
+  try {
+    await deactivateRegistration(userId, reason);
+    show('Account deactivated (suspended)', 'success');
+    load();
+  } catch (err) { show(err.message, 'error'); }
+};
+
+const handleDelete = async (userId) => {
+  try {
+    await deleteRegistration(userId);
+    show('Registration permanently deleted', 'success');
+    load();
+  } catch (err) { show(err.message, 'error'); }
+};
+
   const handleReject = async (userId, reason) => {
     try {
       await rejectRegistration(userId, reason);
@@ -398,16 +506,17 @@ export default function RegistrationsPage() {
           )}
         </Card>
       </div>
-
-      {selected && (
-        <DetailModal
-          reg={selected}
-          onClose={() => { setSelected(null); load(); }}
-          onApprove={handleApprove}
-          onReject={handleReject}
-          onResetKyc={handleResetKyc}
-        />
-      )}
+{selected && (
+  <DetailModal
+    reg={selected}
+    onClose={() => { setSelected(null); load(); }}
+    onApprove={handleApprove}
+    onReject={handleReject}
+    onResetKyc={handleResetKyc}
+    onDeactivate={handleDeactivate}   
+    onDelete={handleDelete}     
+  />
+)}
     </AdminLayout>
   );
 }
