@@ -413,6 +413,8 @@ export default function RatesPage() {
   const [bulkFile, setBulkFile]   = useState(null);
   const [bulkResult, setBulkResult] = useState(null);
   const [templateLoading, setTemplateLoading] = useState(false);
+  const [selected, setSelected] = useState(new Set());   // selected rate _ids
+const [bulkDeleting, setBulkDeleting] = useState(false);
 
   /* Dynamic data */
   const [shippingLines, setShippingLines] = useState(DEFAULT_SHIPPING_LINES);
@@ -446,8 +448,9 @@ export default function RatesPage() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await getRates({ mode:modeFilter||undefined, page, limit:20 });
+     const res = await getRates({ mode: modeFilter || undefined, page, limit: 400 });
       setData(res.data.rates);
+      setSelected(new Set());
       setPagination(res.data.pagination);
     } catch (err) { show(err.message,'error'); }
     finally { setLoading(false); }
@@ -533,27 +536,60 @@ export default function RatesPage() {
     } catch (err) { show(err.message,'error'); }
     finally { setSubmitting(false); }
   };
+  const handleBulkDelete = async () => {
+  if (selected.size === 0) return;
+  if (!window.confirm(`Deactivate ${selected.size} selected rate${selected.size > 1 ? 's' : ''}?`)) return;
+  setBulkDeleting(true);
+  try {
+    await Promise.all([...selected].map(id => deleteRate(id)));
+    show(`${selected.size} rate${selected.size > 1 ? 's' : ''} deactivated`, 'success');
+    setSelected(new Set());
+    load();
+  } catch (err) {
+    show(err.message, 'error');
+  } finally {
+    setBulkDeleting(false);
+  }
+};
 
-  const columns = [
-    { key:'shippingLine', title:'Carrier',
-      render:(v,r) => <div><div style={{ fontWeight:700 }}>{v}</div><div style={{ fontSize:10, color:C.textMuted, fontFamily:'JetBrains Mono,monospace' }}>{r.shippingLineCode} · {r.rateType}</div></div> },
-    { key:'originPort', title:'Route',
-      render:(v,r) => <div><span style={{ fontWeight:700, fontFamily:'JetBrains Mono,monospace', fontSize:12 }}>{v}</span><span style={{ color:C.textMuted, margin:'0 4px' }}>→</span><span style={{ fontWeight:700, fontFamily:'JetBrains Mono,monospace', fontSize:12 }}>{r.destinationPort}</span>{r.viaPort?.length>0&&<div style={{ fontSize:10, color:C.textMuted }}>via {r.viaPort.join(', ')}</div>}</div> },
-    { key:'containerType', title:'Eqpt',
-      render:v => v?<span style={{ fontSize:11, fontWeight:700, padding:'2px 7px', borderRadius:4, background:'#EFF6FF', color:C.navy }}>{v}</span>:'—' },
-    { key:'freightRateUsd', title:'Freight (USD)',
-      render:v => <span style={{ fontWeight:700, fontFamily:'JetBrains Mono,monospace', color:C.navy }}>USD {(v||0).toLocaleString()}</span> },
-    { key:'totalUsd', title:'Total (USD)',
-      render:v => <span style={{ fontWeight:800, fontFamily:'JetBrains Mono,monospace', color:C.orange }}>USD {(v||0).toLocaleString()}</span> },
-    { key:'sailingDate', title:'Sailing', render:v => <span style={{ fontSize:12 }}>{fmtDate(v)}</span> },
-    { key:'transitTimeDays', title:'Transit', render:v => v?`${v}d`:'—' },
-    { key:'isActive', title:'Status', render:v => <Badge status={v?'active':'rejected'} label={v?'Active':'Off'}/> },
-    { key:'_id', title:'', align:'right',
-      render:(v,row) => <div style={{ display:'flex', gap:6 }}>
-        <Btn variant="ghost" size="sm" icon={<Icon name="edit" size={12}/>} onClick={() => openEdit(row)}>Edit</Btn>
-        <Btn variant="danger" size="sm" onClick={() => handleDelete(v)}>Del</Btn>
-      </div> },
-  ];
+ const allIds = data.map(r => r._id);
+const allSelected = allIds.length > 0 && allIds.every(id => selected.has(id));
+const someSelected = allIds.some(id => selected.has(id));
+
+const toggleAll = () => {
+  if (allSelected) setSelected(new Set());
+  else setSelected(new Set(allIds));
+};
+const toggleOne = (id) => {
+  setSelected(prev => {
+    const next = new Set(prev);
+    next.has(id) ? next.delete(id) : next.add(id);
+    return next;
+  });
+};
+
+const columns = [
+  {
+    key: '__check', title: (
+      <input type="checkbox" checked={allSelected} ref={el => { if (el) el.indeterminate = someSelected && !allSelected; }}
+        onChange={toggleAll}
+        style={{ cursor: 'pointer', width: 15, height: 15, accentColor: C.navy }} />
+    ), width: 36,
+    render: (v, row) => (
+      <input type="checkbox" checked={selected.has(row._id)} onChange={() => toggleOne(row._id)}
+        style={{ cursor: 'pointer', width: 15, height: 15, accentColor: C.navy }} />
+    ),
+  },
+  { key: 'shippingLine', title: 'Carrier', render: (v, r) => <div><div style={{ fontWeight: 700 }}>{v}</div><div style={{ fontSize: 10, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace' }}>{r.shippingLineCode} · {r.rateType}</div></div> },
+  { key: 'originPort', title: 'Route', render: (v, r) => <div><span style={{ fontWeight: 700, fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>{v}</span><span style={{ color: C.textMuted, margin: '0 4px' }}>→</span><span style={{ fontWeight: 700, fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>{r.destinationPort}</span>{r.viaPort?.length > 0 && <div style={{ fontSize: 10, color: C.textMuted }}>via {r.viaPort.join(', ')}</div>}</div> },
+  { key: 'containerType', title: 'Eqpt', render: v => v ? <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 7px', borderRadius: 4, background: '#EFF6FF', color: C.navy }}>{v}</span> : '—' },
+  { key: 'freightRateUsd', title: 'Freight (USD)', render: v => <span style={{ fontWeight: 700, fontFamily: 'JetBrains Mono, monospace', color: C.navy }}>USD {(v||0).toLocaleString()}</span> },
+  { key: 'totalUsd', title: 'Total (USD)', render: v => <span style={{ fontWeight: 800, fontFamily: 'JetBrains Mono, monospace', color: C.orange }}>USD {(v||0).toLocaleString()}</span> },
+  { key: 'sailingDate', title: 'Sailing', render: v => <span style={{ fontSize: 12 }}>{fmtDate(v)}</span> },
+  { key: 'transitTimeDays', title: 'Transit', render: v => v ? `${v}d` : '—' },
+  { key: 'isActive', title: 'Status', render: v => <Badge status={v ? 'active' : 'rejected'} label={v ? 'Active' : 'Off'} /> },
+  { key: '_id', title: '', align: 'right', render: (v, row) => <div style={{ display: 'flex', gap: 6 }}><Btn variant="ghost" size="sm" icon={<Icon name="edit" size={12} />} onClick={() => openEdit(row)}>Edit</Btn><Btn variant="danger" size="sm" onClick={() => handleDelete(v)}>Del</Btn></div> },
+];
 
   return (
     <AdminLayout>
@@ -573,20 +609,38 @@ export default function RatesPage() {
       />
 
       <div style={{ padding:'20px 28px' }}>
-        <div style={{ display:'flex', gap:8, marginBottom:16 }}>
-          <div style={{ display:'flex', gap:4, background:'#fff', borderRadius:8, padding:4, border:`1px solid ${C.border}` }}>
-            {['',...MODES].map(m => (
-              <button key={m} onClick={() => { setModeFilter(m); setPage(1); }}
-                style={{ padding:'5px 12px', borderRadius:6, fontSize:12, fontWeight:600, cursor:'pointer', border:'none', background:modeFilter===m?C.navy:'transparent', color:modeFilter===m?'#fff':C.textSub }}>
-                {m||'All'}
-              </button>
-            ))}
-          </div>
-          <Btn variant="ghost" size="sm" icon={<Icon name="refresh" size={13}/>} onClick={load}>Refresh</Btn>
-          <div style={{ marginLeft:'auto', fontSize:12, color:C.textMuted, alignSelf:'center' }}>
-            {pagination.total||0} rates
-          </div>
-        </div>
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+  <div style={{ display: 'flex', gap: 4, background: '#fff', borderRadius: 8, padding: 4, border: `1px solid ${C.border}` }}>
+    {['', ...MODES].map(m => (
+      <button key={m} onClick={() => { setModeFilter(m); setPage(1); }}
+        style={{ padding: '5px 12px', borderRadius: 6, fontSize: 12, fontWeight: 600, cursor: 'pointer', border: 'none', background: modeFilter === m ? C.navy : 'transparent', color: modeFilter === m ? '#fff' : C.textSub }}>
+        {m || 'All'}
+      </button>
+    ))}
+  </div>
+  <Btn variant="ghost" size="sm" icon={<Icon name="refresh" size={13} />} onClick={load}>Refresh</Btn>
+
+  {/* Bulk action bar — appears only when rows are selected */}
+  {selected.size > 0 && (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 14px', background: '#EFF6FF', border: `1.5px solid ${C.navy}`, borderRadius: 8 }}>
+      <span style={{ fontSize: 12, fontWeight: 700, color: C.navy }}>
+        {selected.size} selected
+      </span>
+      <button onClick={() => setSelected(new Set())}
+        style={{ fontSize: 11, color: C.textMuted, background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px' }}>
+        ✕ Clear
+      </button>
+      <div style={{ width: 1, height: 16, background: C.border }} />
+      <Btn variant="danger" size="sm" loading={bulkDeleting} onClick={handleBulkDelete}>
+        🗑 Delete {selected.size}
+      </Btn>
+    </div>
+  )}
+
+  <div style={{ marginLeft: 'auto', fontSize: 12, color: C.textMuted, alignSelf: 'center' }}>
+    {pagination.total || 0} rates
+  </div>
+</div>
 
         <Card>
           <Table columns={columns} data={data} loading={loading} emptyMsg="No rates yet. Add via form or bulk upload."/>
