@@ -94,3 +94,22 @@ export const deactivateRegistration = (userId, reason) =>
 
 export const deleteRegistration = (userId) =>
   api.delete(`/admin/registrations/${userId}`);
+
+// Add to admin services/api.js
+export const getAirRates        = (params) => api.get('/admin/air-rates', { params });
+export const createAirRate      = (d)      => api.post('/admin/air-rates', d);
+export const updateAirRate      = (id, d)  => api.put(`/admin/air-rates/${id}`, d);
+export const deleteAirRate      = (id)     => api.delete(`/admin/air-rates/${id}`);
+export const bulkUploadAirRates = (fd)     => api.post('/admin/air-rates/bulk', fd, {
+  headers: { 'Content-Type': 'multipart/form-data' }
+});
+export const downloadAirRateTemplate = () =>
+  api.get('/admin/air-rates/template', { responseType: 'blob' }).then(blob => {
+    const url = URL.createObjectURL(new Blob([blob]));
+    const a = document.createElement('a');
+    a.href = url; a.download = 'NGR_Air_Rate_Template.xlsx';
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(url); document.body.removeChild(a); }, 1000);
+  });
+
+  
