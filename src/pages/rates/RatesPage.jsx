@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef, memo } from 'react';
 import AdminLayout, { PageHeader } from '../../components/Layout';
 import { Card, Table, Badge, Btn, Modal, Icon, C, fmtDate, useToast } from '../../components/UI';
-import { getRates, createRate, updateRate, deleteRate, bulkUploadRates, downloadRateTemplate } from '../../services/api';
+import { getRates, createRate, updateRate, deleteRate, bulkUploadRates, downloadRateTemplate, bulkUploadAirRates } from '../../services/api';
 import api from '../../services/api';
 
 /* ─── Static constants ───────────────────────────────────────── */
@@ -415,6 +415,7 @@ export default function RatesPage() {
   const [templateLoading, setTemplateLoading] = useState(false);
   const [selected, setSelected] = useState(new Set());   // selected rate _ids
 const [bulkDeleting, setBulkDeleting] = useState(false);
+const [airBulkResult, setAirBulkResult] = useState(null);
 
   /* Dynamic data */
   const [shippingLines, setShippingLines] = useState(DEFAULT_SHIPPING_LINES);
@@ -524,6 +525,25 @@ const [bulkDeleting, setBulkDeleting] = useState(false);
     finally { setTemplateLoading(false); }
   };
 
+const handleAirBulkUpload = async () => {
+  if (!bulkFile) { show('Please select an .xlsx file first', 'warning'); return; }
+  setSubmitting(true);
+  try {
+    const fd = new FormData();
+    fd.append('file', bulkFile);
+    const res = await bulkUploadAirRates(fd);
+    setAirBulkResult(res);
+    if (res.created > 0) {
+      show(`✈ ${res.created} air route(s) uploaded — ${res.total} total groups processed`, 'success');
+    } else {
+      show(`0 air rates uploaded — check errors below`, 'warning');
+    }
+  } catch(err) {
+    show(`Upload failed: ${err.message}`, 'error');
+  } finally {
+    setSubmitting(false);
+  }
+};
   const handleBulkUpload = async () => {
     if (!bulkFile) { show('Select a file','warning'); return; }
     setSubmitting(true);
@@ -580,13 +600,43 @@ const columns = [
         style={{ cursor: 'pointer', width: 15, height: 15, accentColor: C.navy }} />
     ),
   },
-  { key: 'shippingLine', title: 'Carrier', render: (v, r) => <div><div style={{ fontWeight: 700 }}>{v}</div><div style={{ fontSize: 10, color: C.textMuted, fontFamily: 'JetBrains Mono, monospace' }}>{r.shippingLineCode} · {r.rateType}</div></div> },
+ { key: 'shippingLine', title: 'Carrier', render: (v, r) => (
+  <div>
+    <div style={{ fontWeight:700 }}>{v}</div>
+    <div style={{ fontSize:10, color:C.textMuted, fontFamily:'JetBrains Mono,monospace' }}>
+      {r._airRate ? `✈ ${r.slabs?.length || 0} slabs · VW÷${r.vwDivisor||6000}` : `${r.shippingLineCode} · ${r.rateType}`}
+    </div>
+  </div>
+)},
   { key: 'originPort', title: 'Route', render: (v, r) => <div><span style={{ fontWeight: 700, fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>{v}</span><span style={{ color: C.textMuted, margin: '0 4px' }}>→</span><span style={{ fontWeight: 700, fontFamily: 'JetBrains Mono, monospace', fontSize: 12 }}>{r.destinationPort}</span>{r.viaPort?.length > 0 && <div style={{ fontSize: 10, color: C.textMuted }}>via {r.viaPort.join(', ')}</div>}</div> },
-  { key: 'containerType', title: 'Eqpt', render: v => v ? <span style={{ fontSize: 11, fontWeight: 700, padding: '2px 7px', borderRadius: 4, background: '#EFF6FF', color: C.navy }}>{v}</span> : '—' },
-  { key: 'freightRateUsd', title: 'Freight (USD)', render: v => <span style={{ fontWeight: 700, fontFamily: 'JetBrains Mono, monospace', color: C.navy }}>USD {(v||0).toLocaleString()}</span> },
-  { key: 'totalUsd', title: 'Total (USD)', render: v => <span style={{ fontWeight: 800, fontFamily: 'JetBrains Mono, monospace', color: C.orange }}>USD {(v||0).toLocaleString()}</span> },
+ { key: 'containerType', title: 'Eqpt/Cargo', render: (v, r) => (
+  <span style={{ fontSize:11, fontWeight:700, padding:'2px 7px', borderRadius:4,
+    background: r._airRate ? '#F0F8FF' : '#EFF6FF', color:C.navy }}>
+    {v || '—'}
+  </span>
+)},
+  { key: 'freightRateUsd', title: 'Rate from', render: (v, r) => (
+  r._airRate
+    ? <span style={{ fontWeight:700, fontFamily:'JetBrains Mono,monospace', color:C.navy }}>
+        USD {(r.slabs?.[0]?.ratePerKg||0).toFixed(2)}/KG
+      </span>
+    : <span style={{ fontWeight:700, fontFamily:'JetBrains Mono,monospace', color:C.navy }}>
+        USD {(v||0).toLocaleString()}
+      </span>
+)},
+  { key: 'totalUsd', title: 'Min Charge', render: (v, r) => (
+  r._airRate
+    ? <span style={{ fontWeight:800, fontFamily:'JetBrains Mono,monospace', color:C.orange }}>
+        USD {(r.slabs?.[0]?.minCharge||0).toLocaleString()}
+      </span>
+    : <span style={{ fontWeight:800, fontFamily:'JetBrains Mono,monospace', color:C.orange }}>
+        USD {(v||0).toLocaleString()}
+      </span>
+)},
   { key: 'sailingDate', title: 'Sailing', render: v => <span style={{ fontSize: 12 }}>{fmtDate(v)}</span> },
-  { key: 'transitTimeDays', title: 'Transit', render: v => v ? `${v}d` : '—' },
+  { key: 'transitTimeDays', title: 'Transit', render: (v, r) =>
+  r._airRate ? (r.transitTime || '—') : (v ? `${v}d` : '—')
+},
   { key: 'isActive', title: 'Status', render: v => <Badge status={v ? 'active' : 'rejected'} label={v ? 'Active' : 'Off'} /> },
   { key: '_id', title: '', align: 'right', render: (v, row) => <div style={{ display: 'flex', gap: 6 }}><Btn variant="ghost" size="sm" icon={<Icon name="edit" size={12} />} onClick={() => openEdit(row)}>Edit</Btn><Btn variant="danger" size="sm" onClick={() => handleDelete(v)}>Del</Btn></div> },
 ];
@@ -595,18 +645,22 @@ const columns = [
     <AdminLayout>
       {ToastEl}
       <PageHeader
-        title="Rate Management"
-        subtitle="Full-spec rate entry: freight + origin + destination charges"
-        actions={<>
-          <Btn variant="ghost" size="sm" icon={<Icon name="upload" size={13}/>}
-            onClick={() => { setBulkResult(null); setBulkFile(null); setModal('bulk'); }}>
-            Bulk Upload
-          </Btn>
-          <Btn variant="orange" size="sm" icon={<Icon name="plus" size={13}/>} onClick={openCreate}>
-            + Add Rate
-          </Btn>
-        </>}
-      />
+  title="Rate Management"
+  subtitle="Full-spec rate entry: freight + origin + destination charges"
+  actions={<>
+    <Btn variant="ghost" size="sm" icon={<Icon name="upload" size={13}/>}
+      onClick={() => { setBulkResult(null); setBulkFile(null); setModal('bulk'); }}>
+      Sea Bulk Upload
+    </Btn>
+    <Btn variant="ghost" size="sm"
+      onClick={() => { setBulkFile(null); setModal('air-bulk'); }}>
+      ✈ Air Upload
+    </Btn>
+    <Btn variant="orange" size="sm" icon={<Icon name="plus" size={13}/>} onClick={openCreate}>
+      + Add Rate
+    </Btn>
+  </>}
+/>
 
       <div style={{ padding:'20px 28px' }}>
         <div style={{ display: 'flex', gap: 8, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
@@ -677,79 +731,156 @@ const columns = [
       </Modal>
 
       {/* ── Bulk Upload Modal ── */}
-      <Modal open={modal==='bulk'}
-        onClose={() => { setModal(null); setBulkResult(null); setBulkFile(null); }}
-        title="Bulk Rate Upload (.xlsx)" width={580}
-        footer={
-          <div style={{ display:'flex', gap:8, width:'100%', alignItems:'center' }}>
-            <Btn variant="ghost" size="sm" loading={templateLoading} onClick={handleDownloadTemplate}
-              icon={<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>}>
-              Download Template
-            </Btn>
-            <div style={{ flex:1 }}/>
-            <Btn variant="ghost" onClick={() => { setModal(null); setBulkResult(null); setBulkFile(null); }}>Close</Btn>
-            <Btn variant="orange" loading={submitting} onClick={handleBulkUpload} disabled={!bulkFile||submitting}>
-              {submitting ? 'Uploading…' : 'Upload Rates'}
-            </Btn>
-          </div>
-        }>
-        <div>
-          <div style={{ padding:'11px 14px', background:'#EFF6FF', border:'1px solid #BFDBFE', borderRadius:8, marginBottom:14, fontSize:12, color:C.navy, lineHeight:1.75 }}>
-            <div style={{ fontWeight:700, marginBottom:4 }}>📋 Template column format</div>
-            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'2px 16px' }}>
-              {['Mode, Rate Type, Shipping Line, SCAC','Container Type, Service Mode, Service Name','POL Code, POL Name, Origin Terminal','POD Code, POD Name, Destination Terminal','Via Codes, Via Names (comma-separated)','Sailing Date, Transit Days, Free Days','Cargo Type, Cargo Description','Valid From, Valid To','FC1–FC6: Name / Code / Basis / Currency / Amount','OC1–OC9: Name / Code / Basis / Currency / Amount','DC1–DC9: Name / Code / Basis / Currency / Amount','Inclusions, Remarks'].map((t,i) => (
-                <div key={i} style={{ color:'#1e40af', fontSize:11 }}>· {t}</div>
-              ))}
-            </div>
-            <div style={{ marginTop:6, fontSize:11, color:'#374151' }}>
-              <strong>Required:</strong> Shipping Line · POL Code · POD Code · Valid From
-            </div>
-          </div>
-
-          <div onClick={() => fileRef.current?.click()}
-            onDragOver={e => e.preventDefault()}
-            onDrop={e => { e.preventDefault(); const f=e.dataTransfer.files[0]; if(f){setBulkFile(f);setBulkResult(null);} }}
-            style={{ border:`2px dashed ${bulkFile?C.green:C.borderMd}`, borderRadius:10, padding:'26px 20px', textAlign:'center', cursor:'pointer', background:bulkFile?'#ECFDF5':C.grayLight, marginBottom:12, transition:'all .15s' }}>
-            <Icon name="upload" size={26} color={bulkFile?C.green:C.textMuted}/>
-            <div style={{ fontSize:13, color:bulkFile?C.green:C.textSub, marginTop:8, fontWeight:600 }}>
-              {bulkFile ? bulkFile.name : 'Drop .xlsx file here or click to browse'}
-            </div>
-            {bulkFile && (
-              <div style={{ fontSize:11, color:C.textMuted, marginTop:3 }}>
-                {(bulkFile.size/1024).toFixed(1)} KB ·&nbsp;
-                <span style={{ color:C.red, cursor:'pointer', textDecoration:'underline' }}
-                  onClick={e => { e.stopPropagation(); setBulkFile(null); setBulkResult(null); }}>Remove</span>
-              </div>
-            )}
-          </div>
-          <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{ display:'none' }}
-            onChange={e => { setBulkFile(e.target.files[0]); setBulkResult(null); }}/>
-
-          {bulkResult && (
-            <div style={{ borderRadius:8, overflow:'hidden', border:`1px solid ${bulkResult.created>0?'#BBF7D0':'#FECACA'}` }}>
-              <div style={{ padding:'10px 14px', background:bulkResult.created>0?'#ECFDF5':'#FEF2F2', display:'flex', gap:10, alignItems:'center' }}>
-                <span style={{ fontSize:16 }}>{bulkResult.created>0?'✅':'❌'}</span>
-                <div>
-                  <div style={{ fontWeight:700, fontSize:13, color:bulkResult.created>0?C.green:C.red }}>
-                    {bulkResult.created} of {bulkResult.total} rate(s) imported successfully
-                  </div>
-                  {bulkResult.errors?.length>0 && <div style={{ fontSize:11, color:C.textMuted }}>{bulkResult.errors.length} row(s) had errors and were skipped</div>}
-                </div>
-              </div>
-              {bulkResult.errors?.length>0 && (
-                <div style={{ maxHeight:200, overflowY:'auto', background:'#fff' }}>
-                  {bulkResult.errors.map((e,i) => (
-                    <div key={i} style={{ display:'flex', gap:10, padding:'7px 14px', borderTop:'1px solid #FEE2E2', alignItems:'flex-start' }}>
-                      <span style={{ flexShrink:0, fontSize:11, fontWeight:700, color:'#fff', background:C.red, borderRadius:4, padding:'1px 6px', marginTop:1, fontFamily:'monospace' }}>Row {e.row}</span>
-                      <span style={{ fontSize:12, color:'#7f1d1d', lineHeight:1.5 }}>{e.error}</span>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+    {/* ── Sea Bulk Upload Modal ── */}
+<Modal open={modal==='bulk'}
+  onClose={() => { setModal(null); setBulkResult(null); setBulkFile(null); }}
+  title="Sea/FCL Bulk Rate Upload (.xlsx)" width={580}
+  footer={
+    <div style={{ display:'flex', gap:8, width:'100%', alignItems:'center' }}>
+      <Btn variant="ghost" size="sm" loading={templateLoading} onClick={handleDownloadTemplate}
+        icon={<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>}>
+        Download Template
+      </Btn>
+      <div style={{ flex:1 }}/>
+      <Btn variant="ghost" onClick={() => { setModal(null); setBulkResult(null); setBulkFile(null); }}>Close</Btn>
+      <Btn variant="orange" loading={submitting} onClick={handleBulkUpload} disabled={!bulkFile||submitting}>
+        {submitting ? 'Uploading…' : 'Upload Sea Rates'}
+      </Btn>
+    </div>
+  }>
+  <div>
+    <div style={{ padding:'11px 14px', background:'#EFF6FF', border:'1px solid #BFDBFE', borderRadius:8, marginBottom:14, fontSize:12, color:C.navy, lineHeight:1.75 }}>
+      <div style={{ fontWeight:700, marginBottom:4 }}>📋 Template column format (Sea/FCL/LCL)</div>
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'2px 16px' }}>
+        {['Mode, Rate Type, Shipping Line, SCAC','Container Type, Service Mode, Service Name','POL Code, POL Name, Origin Terminal','POD Code, POD Name, Destination Terminal','Via Codes, Via Names (comma-separated)','Sailing Date, Transit Days, Free Days','Cargo Type, Cargo Description','Valid From, Valid To','FC1–FC6: Name / Code / Basis / Currency / Amount','OC1–OC9: Name / Code / Basis / Currency / Amount','DC1–DC9: Name / Code / Basis / Currency / Amount','Inclusions, Remarks'].map((t,i) => (
+          <div key={i} style={{ color:'#1e40af', fontSize:11 }}>· {t}</div>
+        ))}
+      </div>
+    </div>
+    <div onClick={() => fileRef.current?.click()}
+      onDragOver={e => e.preventDefault()}
+      onDrop={e => { e.preventDefault(); const f=e.dataTransfer.files[0]; if(f){setBulkFile(f);setBulkResult(null);} }}
+      style={{ border:`2px dashed ${bulkFile?C.green:C.borderMd}`, borderRadius:10, padding:'26px 20px', textAlign:'center', cursor:'pointer', background:bulkFile?'#ECFDF5':C.grayLight, marginBottom:12 }}>
+      <Icon name="upload" size={26} color={bulkFile?C.green:C.textMuted}/>
+      <div style={{ fontSize:13, color:bulkFile?C.green:C.textSub, marginTop:8, fontWeight:600 }}>
+        {bulkFile ? bulkFile.name : 'Drop .xlsx file here or click to browse'}
+      </div>
+      {bulkFile && (
+        <div style={{ fontSize:11, color:C.textMuted, marginTop:3 }}>
+          {(bulkFile.size/1024).toFixed(1)} KB ·&nbsp;
+          <span style={{ color:C.red, cursor:'pointer', textDecoration:'underline' }}
+            onClick={e => { e.stopPropagation(); setBulkFile(null); setBulkResult(null); }}>Remove</span>
         </div>
-      </Modal>
+      )}
+    </div>
+    <input ref={fileRef} type="file" accept=".xlsx,.xls" style={{ display:'none' }}
+      onChange={e => { setBulkFile(e.target.files[0]); setBulkResult(null); }}/>
+    {bulkResult && (
+      <div style={{ borderRadius:8, overflow:'hidden', border:`1px solid ${bulkResult.created>0?'#BBF7D0':'#FECACA'}` }}>
+        <div style={{ padding:'10px 14px', background:bulkResult.created>0?'#ECFDF5':'#FEF2F2', display:'flex', gap:10, alignItems:'center' }}>
+          <span style={{ fontSize:16 }}>{bulkResult.created>0?'✅':'❌'}</span>
+          <div>
+            <div style={{ fontWeight:700, fontSize:13, color:bulkResult.created>0?C.green:C.red }}>
+              {bulkResult.created} of {bulkResult.total} rate(s) imported successfully
+            </div>
+            {bulkResult.errors?.length>0 && <div style={{ fontSize:11, color:C.textMuted }}>{bulkResult.errors.length} row(s) had errors</div>}
+          </div>
+        </div>
+        {bulkResult.errors?.length>0 && (
+          <div style={{ maxHeight:160, overflowY:'auto', background:'#fff' }}>
+            {bulkResult.errors.map((e,i) => (
+              <div key={i} style={{ display:'flex', gap:10, padding:'7px 14px', borderTop:'1px solid #FEE2E2' }}>
+                <span style={{ flexShrink:0, fontSize:11, fontWeight:700, color:'#fff', background:C.red, borderRadius:4, padding:'1px 6px', fontFamily:'monospace' }}>Row {e.row}</span>
+                <span style={{ fontSize:12, color:'#7f1d1d' }}>{e.error}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    )}
+  </div>
+</Modal>
+
+{/* ── Air Rate Bulk Upload Modal — SEPARATE, not nested ── */}
+<Modal open={modal==='air-bulk'}
+  onClose={() => { setModal(null); setBulkFile(null); }}
+  title="✈ Air Freight Rate Upload (.xlsx)" width={540}
+  footer={
+    <div style={{ display:'flex', gap:8, width:'100%', alignItems:'center' }}>
+      <Btn variant="ghost" size="sm"
+        onClick={() => window.open('/admin/air-rate-template', '_blank')}
+        icon={<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>}>
+        Download Air Template
+      </Btn>
+      <div style={{ flex:1 }}/>
+      <Btn variant="ghost" onClick={() => { setModal(null); setBulkFile(null); }}>Close</Btn>
+      <Btn variant="orange" loading={submitting} onClick={handleAirBulkUpload} disabled={!bulkFile || submitting}>
+        {submitting ? 'Uploading…' : '✈ Upload Air Rates'}
+      </Btn>
+    </div>
+  }>
+  <div>
+    {/* Info box */}
+    <div style={{ padding:'12px 14px', background:'#EEF3FF', border:'1px solid #BFCFFF', borderRadius:8, marginBottom:14, fontSize:12, color:C.navy, lineHeight:1.8 }}>
+      <div style={{ fontWeight:700, marginBottom:6 }}>✈ Air Rate Column Format</div>
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'3px 16px' }}>
+        {[
+          'Origin Airport (IATA e.g. DXB)',
+          'Destination Airport (IATA e.g. MAA)',
+          'Carrier / Airline',
+          'Cargo Type (FAK/HAZ/PHAR/COOL)',
+          'Min CW (excl.) KG',
+          'Max CW (incl.) KG',
+          'Slab Name',
+          'VW Divisor (default 6000)',
+          'Rate USD/KG',
+          'Rate Currency',
+          'Transit Time (days)',
+          'Min Charge USD',
+          'Valid From (YYYY-MM-DD)',
+          'Remarks',
+        ].map((t,i) => (
+          <div key={i} style={{ color:'#1e40af', fontSize:11 }}>· {t}</div>
+        ))}
+      </div>
+      <div style={{ marginTop:8, padding:'8px 10px', background:'#FEF08A', borderRadius:6, fontSize:11, color:'#92400E', fontWeight:600 }}>
+        ⚠️ One row = one weight slab. Multiple rows with same Origin + Destination + Carrier are automatically grouped into one rate with multiple slabs.
+      </div>
+    </div>
+
+    {/* Drop zone */}
+    <div onClick={() => fileRef.current?.click()}
+      onDragOver={e => e.preventDefault()}
+      onDrop={e => { e.preventDefault(); setBulkFile(e.dataTransfer.files[0]); }}
+      style={{ border:`2px dashed ${bulkFile ? C.green : '#0B1D5E'}`, borderRadius:10, padding:'28px 20px',
+        textAlign:'center', cursor:'pointer', background: bulkFile ? '#ECFDF5' : '#F7F9FF', marginBottom:12 }}>
+      <div style={{ fontSize:32, marginBottom:8 }}>✈</div>
+      <div style={{ fontSize:13, color: bulkFile ? C.green : C.navy, fontWeight:700 }}>
+        {bulkFile ? `✅ ${bulkFile.name}` : 'Drop NGR_Air_Test_Rates_Upload.xlsx here'}
+      </div>
+      <div style={{ fontSize:11, color:C.textMuted, marginTop:4 }}>
+        {bulkFile
+          ? `${(bulkFile.size/1024).toFixed(1)} KB · `
+          : 'or click to browse · '}
+        {bulkFile
+          ? <span style={{ color:C.red, cursor:'pointer', textDecoration:'underline' }}
+              onClick={e => { e.stopPropagation(); setBulkFile(null); }}>Remove</span>
+          : 'accepts .xlsx files'}
+      </div>
+    </div>
+    <input ref={fileRef} type="file" accept=".xlsx" style={{ display:'none' }}
+      onChange={e => setBulkFile(e.target.files[0])}/>
+
+    {/* How it works */}
+    <div style={{ padding:'10px 12px', background:'#F7F9FF', border:`1px solid ${C.border}`, borderRadius:8, fontSize:11, color:C.textMid, lineHeight:1.7 }}>
+      <strong style={{ color:C.navy }}>How the upload works:</strong><br/>
+      1. Parser reads all rows from Sheet 1<br/>
+      2. Groups rows by Origin + Destination + Carrier + Cargo Type<br/>
+      3. Each group becomes one AirRate document with multiple weight slabs<br/>
+      4. The test file has 4 routes (DXB→MAA, DXB→BOM, SIN→MAA, DXB→DEL) × 7 slabs = 28 rows → 4 rate docs
+    </div>
+  </div>
+</Modal>
     </AdminLayout>
   );
 }
