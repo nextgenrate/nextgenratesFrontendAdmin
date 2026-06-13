@@ -164,16 +164,22 @@ export function EnquiriesPage() {
 
   useEffect(() => { load(); }, [load]);
 
-  const handleRespond = async (newStatus) => {
-    setSubmitting(true);
-    try {
-      await updateEnquiry(selected._id, { status: newStatus, adminResponse: responseText });
-      show('Response sent', 'success');
-      setModal(false);
-      load();
-    } catch (err) { show(err.message, 'error'); }
-    finally { setSubmitting(false); }
-  };
+const handleRespond = async (newStatus) => {
+  setSubmitting(true);
+  try {
+    await updateEnquiry(selected._id, { status: newStatus, adminResponse: responseText });
+
+    const msgs = {
+      responded:    'Response sent — customer notified by email ✅',
+      under_review: 'Marked as under review',
+      closed:       'Enquiry closed — customer notified',
+    };
+    show(msgs[newStatus] || 'Updated', 'success');
+    setModal(false);
+    load();
+  } catch (err) { show(err.message, 'error'); }
+  finally { setSubmitting(false); }
+};
 
   const columns = [
     { key: 'enquiryRef', title: 'Ref', render: v => <span style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: 11, fontWeight: 700, color: C.purple }}>{v}</span> },
