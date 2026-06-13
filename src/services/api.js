@@ -1,6 +1,6 @@
 import axios from 'axios';
 
-const BASE = process.env.REACT_APP_API_URL || 'https://nextgenratesbackend-production.up.railway.app/api';
+const BASE = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 const api = axios.create({ baseURL: BASE });
 
 api.interceptors.request.use(config => {
@@ -73,7 +73,7 @@ export const getRegistrations    = (params) => api.get('/admin/registrations', {
 export const approveRegistration = (userId) => api.patch(`/admin/registrations/${userId}/approve`);
 export const rejectRegistration  = (userId, reason) => api.patch(`/admin/registrations/${userId}/reject`, { reason });
 
-// ─── Aliases for admin page imports ─────────────────────────────
+// ─── Aliases for admin page imports ─────────────────────────────updateBooking
 // BookingsPage uses: getBookings, updateBooking
 export const getBookings   = (params) => api.get('/admin/bookings', { params });
 export const updateBooking = (id, d)  => api.patch(`/admin/bookings/${id}`, d);
@@ -89,3 +89,8 @@ export const updateEnquiry   = (id, d)  => api.patch(`/admin/enquiries/${id}`, d
 
 // Reset KYC (super admin)
 export const resetUserKyc = (userId) => api.patch(`/admin/registrations/${userId}/reset-kyc`);
+export const deactivateRegistration = (userId, reason) =>
+  api.patch(`/admin/registrations/${userId}/deactivate`, { reason });
+
+export const deleteRegistration = (userId) =>
+  api.delete(`/admin/registrations/${userId}`);
