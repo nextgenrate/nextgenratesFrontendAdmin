@@ -1,7 +1,11 @@
 import React, { useState, useEffect, useCallback, useRef, memo } from 'react';
 import AdminLayout, { PageHeader } from '../../components/Layout';
 import { Card, Table, Badge, Btn, Modal, Icon, C, fmtDate, useToast } from '../../components/UI';
-import { getRates, createRate, updateRate, deleteRate, bulkUploadRates, downloadRateTemplate, bulkUploadAirRates } from '../../services/api';
+import {
+  getRates, createRate, updateRate, deleteRate,
+  bulkUploadRates, downloadRateTemplate, bulkUploadAirRates,
+  createAirRate, updateAirRate, deleteAirRate,
+} from '../../services/api';
 import api from '../../services/api';
 
 /* ─── Static constants ───────────────────────────────────────── */
@@ -163,18 +167,29 @@ const RateForm = memo(({ initialValues, shippingLines, ports, onChange }) => {
   );
 
   /* Port autocomplete for POL/POD */
-  const PortInput = ({ label, refKey, placeholder, required }) => {
-    const [query, setQuery] = useState(initialValues[refKey] || '');
-    const [suggestions, setSuggestions] = useState([]);
-    const [open, setOpen] = useState(false);
-    const debounce = useRef();
-    const wrapRef = useRef();
+/* Port autocomplete for POL/POD */
+const PortInput = ({ label, refKey, placeholder, required }) => {
+  const [query, setQuery] = useState(initialValues[refKey] || '');
+  const [suggestions, setSuggestions] = useState([]);
+  const [open, setOpen] = useState(false);
+  const debounce = useRef();
+  const wrapRef = useRef();
 
-    useEffect(() => {
-      const h = e => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
-      document.addEventListener('mousedown', h);
-      return () => document.removeEventListener('mousedown', h);
-    }, []);
+  useEffect(() => {
+    const h = e => { if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, []);
+
+  // FIX: seed the ref on mount. Without this, refs[refKey].current stays
+  // undefined until the user types, so editing a rate without touching
+  // POL/POD wipes originPort/destinationPort on save.
+  useEffect(() => {
+    if (refs[refKey]) refs[refKey].current = { value: initialValues[refKey] || '' };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+
 
     const handleChange = (val) => {
       setQuery(val);
@@ -436,8 +451,8 @@ const [airBulkResult, setAirBulkResult] = useState(null);
   /* ── Load all ports for autocomplete ── */
   useEffect(() => {
     Promise.all([
-      api.get('/rates/ports/search', { params:{ q:'', type:'sea', limit:200 } }),
-      api.get('/rates/ports/search', { params:{ q:'', type:'air', limit:100 } }),
+     api.get('/admin/ports/search', { params: { q: '', type: 'sea', limit: 200 } }),
+api.get('/admin/ports/search', { params: { q: '', type: 'air', limit: 100 } }),
     ]).then(([sea, air]) => {
       const seaList = sea.data?.data || [];
       const airList = air.data?.data || [];
@@ -498,25 +513,45 @@ const [airBulkResult, setAirBulkResult] = useState(null);
     setModal('form');
   };
 
-  const handleSave = async () => {
-    const f = formValuesRef.current;
-    if (!f.originPort||!f.destinationPort||!f.shippingLine) { show('Origin port, destination port and shipping line required','warning'); return; }
-    if (!f.freightCharges?.some(c=>c.name&&c.amount)) { show('Add at least one freight charge','warning'); return; }
-    setSubmitting(true);
-    try {
-      const p = preparePayload(f);
-      if (editId) { await updateRate(editId,p); show('Rate updated','success'); }
-      else        { await createRate(p);        show('Rate created','success'); }
-      setModal(null); load();
-    } catch (err) { show(err.message,'error'); }
-    finally { setSubmitting(false); }
-  };
+const handleSave = async () => {
+  const f = formValuesRef.current;
+  const isAir = f._airRate || f.mode === 'AIR';
+  const carrierField = isAir ? (f.carrier || f.shippingLine) : f.shippingLine;
 
-  const handleDelete = async (id) => {
-    if (!window.confirm('Deactivate this rate?')) return;
-    try { await deleteRate(id); show('Deactivated','success'); load(); }
-    catch (err) { show(err.message,'error'); }
-  };
+  if (!f.originPort || !f.destinationPort || !carrierField) {
+    show('Origin port, destination port and carrier required', 'warning');
+    return;
+  }
+  if (!isAir && !f.freightCharges?.some(c => c.name && c.amount)) {
+    show('Add at least one freight charge', 'warning');
+    return;
+  }
+
+  setSubmitting(true);
+  try {
+    const p = preparePayload(f);
+    if (isAir) {
+      // Air rates → separate endpoint
+      if (editId) { await updateAirRate(editId, p); show('Air rate updated', 'success'); }
+      else        { await createAirRate(p);          show('Air rate created', 'success'); }
+    } else {
+      if (editId) { await updateRate(editId, p); show('Rate updated', 'success'); }
+      else        { await createRate(p);          show('Rate created', 'success'); }
+    }
+    setModal(null); load();
+  } catch (err) { show(err.message, 'error'); }
+  finally { setSubmitting(false); }
+};
+
+const handleDelete = async (id, row) => {
+  if (!window.confirm('Deactivate this rate?')) return;
+  try {
+    if (row?._airRate) { await deleteAirRate(id); }
+    else               { await deleteRate(id); }
+    show('Deactivated', 'success');
+    load();
+  } catch (err) { show(err.message, 'error'); }
+};
 
   const handleDownloadTemplate = async () => {
     setTemplateLoading(true);
@@ -595,10 +630,12 @@ const columns = [
         onChange={toggleAll}
         style={{ cursor: 'pointer', width: 15, height: 15, accentColor: C.navy }} />
     ), width: 36,
-    render: (v, row) => (
-      <input type="checkbox" checked={selected.has(row._id)} onChange={() => toggleOne(row._id)}
-        style={{ cursor: 'pointer', width: 15, height: 15, accentColor: C.navy }} />
-    ),
+   render: (v, row) => (
+  <div style={{ display:'flex', gap:6 }}>
+    <Btn variant="ghost" size="sm" icon={<Icon name="edit" size={12}/>} onClick={() => openEdit(row)}>Edit</Btn>
+    <Btn variant="danger" size="sm" onClick={() => handleDelete(v, row)}>Del</Btn>
+  </div>
+),
   },
  { key: 'shippingLine', title: 'Carrier', render: (v, r) => (
   <div>
